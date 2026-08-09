@@ -16,19 +16,24 @@ jobs:
 
       - name: Extract project ZIP
         run: |
+          rm -rf app
           mkdir app
           unzip -o mojilo-manish.zip -d app
+          echo "Project files:"
+          ls -la app
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: app/package.json
 
       - name: Install project dependencies
         working-directory: app
         run: npm install
+
+      - name: Install Firebase
+        working-directory: app
+        run: npm install firebase
 
       - name: Install Capacitor
         working-directory: app
@@ -43,7 +48,7 @@ jobs:
         working-directory: app
         run: npx cap add android
 
-      - name: Sync Android project
+      - name: Sync Capacitor
         working-directory: app
         run: npx cap sync android
 
@@ -53,7 +58,7 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Build APK
+      - name: Build Debug APK
         working-directory: app/android
         run: ./gradlew assembleDebug
 
