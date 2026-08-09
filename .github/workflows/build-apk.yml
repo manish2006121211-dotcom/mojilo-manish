@@ -40,12 +40,35 @@ jobs:
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
 
-      - name: Fix Firebase config path
+      - name: Fix Firebase config import
         working-directory: app
         run: |
-          sed -i 's#\.\./firebase-applet-config\.json#../../firebase-applet-config.json#g' src/lib/firebase.ts
-          echo "Firebase import fixed:"
-          grep -n "firebase-applet-config" src/lib/firebase.ts
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          file = Path("src/lib/firebase.ts")
+          text = file.read_text()
+
+          text = re.sub(
+              r'(\.\./)+firebase-applet-config\.json',
+              '../../firebase-applet-config.json',
+              text
+          )
+
+          file.write_text(text)
+
+          print("Firebase config import fixed:")
+          for line in text.splitlines():
+              if "firebase-applet-config" in line:
+                  print(line)
+          PY
+
+      - name: Verify Firebase config
+        working-directory: app
+        run: |
+          test -f firebase-applet-config.json
+          echo "Firebase config file found."
 
       - name: Build web app
         working-directory: app
