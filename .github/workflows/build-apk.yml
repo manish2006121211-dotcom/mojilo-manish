@@ -12,63 +12,94 @@ jobs:
 
     steps:
 
+      # ==========================================
+      # 1. Checkout
+      # ==========================================
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # --------------------------------------------------
-      # 1. Extract ZIP
-      # --------------------------------------------------
+
+      # ==========================================
+      # 2. Find and Extract ZIP
+      # ==========================================
       - name: Extract project ZIP
         shell: bash
         run: |
           set -e
 
-          rm -rf app
+          echo "Searching for ZIP file..."
 
-          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+          ZIP_FILE=$(find . -maxdepth 2 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: ZIP file not found"
+            echo "ERROR: ZIP file not found!"
             exit 1
           fi
 
-          echo "Using ZIP: $ZIP_FILE"
+          echo "ZIP found: $ZIP_FILE"
 
+          rm -rf app
           mkdir -p app
+
           unzip -q "$ZIP_FILE" -d app
 
-          # If ZIP contains one inner folder, move its contents to app/
-          INNER_DIR=$(find app -mindepth 1 -maxdepth 1 -type d | head -n 1 || true)
+          echo "Extracted files:"
+          find app -maxdepth 3 -type f | head -100
 
-          if [ -n "$INNER_DIR" ]; then
-            if [ -f "$INNER_DIR/package.json" ]; then
-              shopt -s dotglob
-              cp -r "$INNER_DIR"/* app/
-              rm -rf "$INNER_DIR"
+
+      # ==========================================
+      # 3. Fix nested ZIP folder
+      # ==========================================
+      - name: Fix project folder
+        shell: bash
+        run: |
+          set -e
+
+          if [ ! -f app/package.json ]; then
+
+            PROJECT_DIR=$(find app -name package.json -type f | head -n 1)
+
+            if [ -z "$PROJECT_DIR" ]; then
+              echo "ERROR: package.json not found!"
+              exit 1
             fi
+
+            PROJECT_DIR=$(dirname "$PROJECT_DIR")
+
+            echo "Project found at: $PROJECT_DIR"
+
+            mkdir -p app_temp
+
+            cp -r "$PROJECT_DIR"/. app_temp/
+
+            rm -rf app
+
+            mv app_temp app
           fi
 
-          echo "Project files:"
-          find app -maxdepth 2 -type f | head -100
+          echo "Final project:"
+          ls -la app
 
-      # --------------------------------------------------
-      # 2. Setup Node.js
-      # --------------------------------------------------
+
+      # ==========================================
+      # 4. Setup Node.js
+      # ==========================================
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: app/package-lock.json
+          node-version: 22
 
-      # --------------------------------------------------
-      # 3. Install dependencies
-      # --------------------------------------------------
+
+      # ==========================================
+      # 5. Install dependencies
+      # ==========================================
       - name: Install project dependencies
         working-directory: app
         shell: bash
         run: |
           set -e
+
+          echo "Installing dependencies..."
 
           if [ -f package-lock.json ]; then
             npm ci
@@ -76,25 +107,32 @@ jobs:
             npm install
           fi
 
-      # --------------------------------------------------
-      # 4. Install Firebase
-      # --------------------------------------------------
+
+      # ==========================================
+      # 6. Install Firebase
+      # ==========================================
       - name: Install Firebase
         working-directory: app
+        shell: bash
         run: |
           npm install firebase
 
-      # --------------------------------------------------
-      # 5. Install Capacitor
-      # --------------------------------------------------
+
+      # ==========================================
+      # 7. Install Capacitor
+      # ==========================================
       - name: Install Capacitor
         working-directory: app
+        shell: bash
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core
+          npm install @capacitor/cli
+          npm install @capacitor/android
 
-      # --------------------------------------------------
-      # 6. Create Firebase configuration
-      # --------------------------------------------------
+
+      # ==========================================
+      # 8. Create Firebase configuration
+      # ==========================================
       - name: Create Firebase configuration
         working-directory: app
         shell: bash
@@ -116,9 +154,10 @@ jobs:
           export const firebaseApp = initializeApp(firebaseConfig);
           EOF
 
-      # --------------------------------------------------
-      # 7. Create Firebase config JSON
-      # --------------------------------------------------
+
+      # ==========================================
+      # 9. Create Firebase JSON
+      # ==========================================
       - name: Create Firebase config JSON
         working-directory: app
         shell: bash
@@ -134,25 +173,31 @@ jobs:
           }
           EOF
 
-      # --------------------------------------------------
-      # 8. Fix old Firebase import paths
-      # --------------------------------------------------
+
+      # ==========================================
+      # 10. Fix Firebase import
+      # ==========================================
       - name: Fix Firebase imports
         working-directory: app
         shell: bash
         run: |
           if [ -f src/lib/firebase.ts ]; then
-            sed -i 's#\.\./\.\./\.\./firebase-applet-config\.json#../../firebase-applet-config.json#g' src/lib/firebase.ts || true
-            sed -i 's#\.\./\.\./firebase-applet-config\.json#../../firebase-applet-config.json#g' src/lib/firebase.ts || true
+
+            sed -i \
+            's#firebase-applet-config.json#../../firebase-applet-config.json#g' \
+            src/lib/firebase.ts || true
+
           fi
 
-      # --------------------------------------------------
-      # 9. Create app icon WITHOUT Python/PIL
-      # --------------------------------------------------
+
+      # ==========================================
+      # 11. Create App Icon
+      # ==========================================
       - name: Create missing app icon
         working-directory: app
         shell: bash
         run: |
+
           mkdir -p src/assets/images
 
           cat > src/assets/images/app_icon.svg <<'EOF'
@@ -169,13 +214,13 @@ jobs:
 
             <circle
               cx="256"
-              cy="220"
-              r="115"
-              fill="#FFFFFF"/>
+              cy="205"
+              r="110"
+              fill="white"/>
 
             <text
               x="256"
-              y="245"
+              y="235"
               text-anchor="middle"
               font-family="Arial"
               font-size="72"
@@ -189,123 +234,160 @@ jobs:
               y="380"
               text-anchor="middle"
               font-family="Arial"
-              font-size="38"
+              font-size="40"
               font-weight="bold"
-              fill="#FFFFFF">
+              fill="white">
               EXAM
             </text>
 
           </svg>
           EOF
 
-      # --------------------------------------------------
-      # 10. Fix missing JPG icon references
-      # --------------------------------------------------
+
+      # ==========================================
+      # 12. Fix Old Icon References
+      # ==========================================
       - name: Fix app icon references
         working-directory: app
         shell: bash
         run: |
-          find src -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js" \) -print0 |
-          while IFS= read -r -d '' file; do
+
+          find src \
+          -type f \
+          \( -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js" \) \
+          -print0 |
+
+          while IFS= read -r -d '' file
+          do
 
             sed -i \
-              -E 's#images/app_icon_[^"]+\.(jpg|jpeg|png)#images/app_icon.svg#g' \
-              "$file" || true
+            -E 's#images/app_icon_[^"]+\.(jpg|jpeg|png)#images/app_icon.svg#g' \
+            "$file" || true
 
             sed -i \
-              -E 's#\./images/app_icon_[^"]+\.(jpg|jpeg|png)#./images/app_icon.svg#g' \
-              "$file" || true
+            -E 's#\./images/app_icon_[^"]+\.(jpg|jpeg|png)#./images/app_icon.svg#g' \
+            "$file" || true
 
           done
 
-      # --------------------------------------------------
-      # 11. Make sure Vite config exists
-      # --------------------------------------------------
+
+      # ==========================================
+      # 13. Check package.json
+      # ==========================================
       - name: Check web project
         working-directory: app
         shell: bash
         run: |
+
           if [ ! -f package.json ]; then
-            echo "ERROR: package.json not found"
+            echo "ERROR: package.json not found!"
             exit 1
           fi
 
-          echo "package.json found"
+          echo "package.json found."
 
-      # --------------------------------------------------
-      # 12. Build Web App
-      # --------------------------------------------------
+
+      # ==========================================
+      # 14. Build Web App
+      # ==========================================
       - name: Build web app
         working-directory: app
         shell: bash
         run: |
+
+          set -e
+
+          echo "Building web application..."
+
           npm run build
 
-      # --------------------------------------------------
-      # 13. Add Android platform
-      # --------------------------------------------------
+
+      # ==========================================
+      # 15. Add Android
+      # ==========================================
       - name: Add Android platform
         working-directory: app
         shell: bash
         run: |
+
           if [ ! -d android ]; then
             npx cap add android
+          else
+            echo "Android platform already exists."
           fi
 
-      # --------------------------------------------------
-      # 14. Sync Capacitor
-      # --------------------------------------------------
+
+      # ==========================================
+      # 16. Sync Capacitor
+      # ==========================================
       - name: Sync Capacitor
         working-directory: app
         shell: bash
         run: |
+
           npx cap sync android
 
-      # --------------------------------------------------
-      # 15. Setup Java
-      # --------------------------------------------------
+
+      # ==========================================
+      # 17. Setup Java
+      # ==========================================
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      # --------------------------------------------------
-      # 16. Give Gradle permission
-      # --------------------------------------------------
+
+      # ==========================================
+      # 18. Give Gradle permission
+      # ==========================================
       - name: Make Gradle executable
         working-directory: app
         shell: bash
         run: |
+
           chmod +x android/gradlew
 
-      # --------------------------------------------------
-      # 17. Build Debug APK
-      # --------------------------------------------------
+
+      # ==========================================
+      # 19. Build APK
+      # ==========================================
       - name: Build Debug APK
         working-directory: app
         shell: bash
         run: |
+
           cd android
+
           ./gradlew assembleDebug
 
-      # --------------------------------------------------
-      # 18. Upload APK
-      # --------------------------------------------------
+
+      # ==========================================
+      # 20. Upload APK
+      # ==========================================
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Mojilo-Manish-APK
           path: app/android/app/build/outputs/apk/debug/app-debug.apk
 
-      # --------------------------------------------------
-      # 19. Show APK location
-      # --------------------------------------------------
+
+      # ==========================================
+      # 21. Confirm APK
+      # ==========================================
       - name: Show APK
         working-directory: app
         shell: bash
         run: |
+
+          echo ""
           echo "======================================"
-          echo "APK BUILD SUCCESSFUL"
+          echo "       MOJILO MANISH APK"
           echo "======================================"
+          echo ""
+
           ls -lh android/app/build/outputs/apk/debug/
+
+          echo ""
+          echo "APK BUILD COMPLETED!"
+          echo ""
