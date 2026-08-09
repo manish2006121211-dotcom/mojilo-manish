@@ -19,7 +19,7 @@ jobs:
           rm -rf app
           mkdir app
           unzip -o mojilo-manish.zip -d app
-          echo "Project files:"
+          echo "Project extracted:"
           ls -la app
 
       - name: Setup Node.js
@@ -39,6 +39,13 @@ jobs:
         working-directory: app
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
+
+      - name: Fix Firebase config path
+        working-directory: app
+        run: |
+          sed -i 's#\.\./firebase-applet-config\.json#../../firebase-applet-config.json#g' src/lib/firebase.ts
+          echo "Firebase import fixed:"
+          grep -n "firebase-applet-config" src/lib/firebase.ts
 
       - name: Build web app
         working-directory: app
