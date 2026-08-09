@@ -23,7 +23,7 @@ jobs:
           unzip -o mojilo-manish.zip -d app
 
           echo "===== PROJECT FILES ====="
-          find app -maxdepth 3 -type f | sort
+          find app -maxdepth 4 -type f | sort
 
 
       - name: Setup Node.js
@@ -68,21 +68,56 @@ jobs:
           echo "Firebase configuration created."
 
 
+      - name: Create missing app icon
+        run: |
+          mkdir -p app/src/assets/images
+
+          python3 - <<'PY'
+          from PIL import Image, ImageDraw
+
+          img = Image.new("RGB", (512, 512), "white")
+          draw = ImageDraw.Draw(img)
+
+          draw.rounded_rectangle(
+              (20, 20, 492, 492),
+              radius=90,
+              fill="#2196F3"
+          )
+
+          draw.text(
+              (120, 205),
+              "MM",
+              fill="white"
+          )
+
+          img.save(
+              "app/src/assets/images/app_icon_1786271094033.jpg",
+              quality=95
+          )
+
+          print("App icon created successfully.")
+          PY
+
+
       - name: Fix Firebase import
         working-directory: app
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           file = Path("src/lib/firebase.ts")
-          text = file.read_text()
 
-          text = text.replace(
-              "import firebaseConfigJson from '../../firebase-applet-config.json';",
-              "import firebaseConfigJson from '../../firebase-applet-config.json';"
-          )
+          if file.exists():
+              text = file.read_text()
 
-          file.write_text(text)
+              text = re.sub(
+                  r'["\'](?:\.\./)+firebase-applet-config\.json["\']',
+                  '"../../firebase-applet-config.json"',
+                  text
+              )
+
+              file.write_text(text)
 
           print("Firebase import checked.")
           PY
