@@ -12,11 +12,9 @@ jobs:
 
     steps:
 
-      # 1. Download repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Extract ZIP
       - name: Extract project ZIP
         run: |
           mkdir -p project
@@ -31,21 +29,18 @@ jobs:
             cp -r . project/
           fi
 
-      # 3. Find actual web project
       - name: Fix project folder
         run: |
           cd project
 
           if [ -f package.json ]; then
-            echo "package.json found in project root."
+            echo "package.json found."
           else
             FOUND=$(find . -name package.json -type f | head -n 1)
 
             if [ -n "$FOUND" ]; then
               DIR=$(dirname "$FOUND")
-
-              echo "package.json found at:"
-              echo "$DIR"
+              echo "Project found in: $DIR"
 
               cp -r "$DIR"/* .
               cp -r "$DIR"/.[!.]* . 2>/dev/null || true
@@ -55,22 +50,16 @@ jobs:
             fi
           fi
 
-          echo "Project contents:"
-          ls -la
-
-      # 4. Setup Node
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
-      # 5. Check Node
       - name: Check Node and npm
         run: |
           node --version
           npm --version
 
-      # 6. Install project dependencies
       - name: Install project dependencies
         working-directory: project
         run: |
@@ -80,20 +69,17 @@ jobs:
             npm install
           fi
 
-      # 7. Install Firebase
       - name: Install Firebase
         working-directory: project
         run: |
           npm install firebase
 
-      # 8. Install Capacitor
       - name: Install Capacitor
         working-directory: project
         run: |
           npm install @capacitor/core @capacitor/cli
           npm install @capacitor/android
 
-      # 9. Create Firebase configuration
       - name: Create Firebase configuration
         working-directory: project
         run: |
@@ -110,14 +96,12 @@ jobs:
 
           echo "Firebase configuration created."
 
-      # 10. Install Pillow
       - name: Install Pillow
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install Pillow
 
-      # 11. Create app icon
-      - name: Create app icon
+      - name: Create required app images
         run: |
           mkdir -p project/src/assets/images
 
@@ -127,23 +111,13 @@ jobs:
 
           size = 1024
 
-          img = Image.new(
-              "RGB",
-              (size, size),
-              "#2563EB"
-          )
-
+          img = Image.new("RGB", (size, size), "#2563EB")
           draw = ImageDraw.Draw(img)
 
           margin = 100
 
           draw.rounded_rectangle(
-              (
-                  margin,
-                  margin,
-                  size - margin,
-                  size - margin
-              ),
+              (margin, margin, size - margin, size - margin),
               radius=180,
               fill="white"
           )
@@ -165,11 +139,7 @@ jobs:
 
           text = "M"
 
-          bbox = draw.textbbox(
-              (0, 0),
-              text,
-              font=font
-          )
+          bbox = draw.textbbox((0, 0), text, font=font)
 
           text_width = bbox[2] - bbox[0]
           text_height = bbox[3] - bbox[1]
@@ -184,45 +154,42 @@ jobs:
               font=font
           )
 
+          # PNG icon
           img.save(
               "project/src/assets/images/icon.png",
               "PNG"
           )
 
-          print("App icon created successfully.")
+          # Required JPG icon
+          img.save(
+              "project/src/assets/images/app_icon_1786271094033.jpg",
+              "JPEG",
+              quality=95
+          )
+
+          print("Required app images created successfully.")
 
           PY
 
-      # 12. Check project
+          ls -lh project/src/assets/images/
+
+      - name: Verify required image
+        working-directory: project
+        run: |
+          test -f src/assets/images/app_icon_1786271094033.jpg
+          echo "Required JPG image found."
+
       - name: Check web project
         working-directory: project
         run: |
           test -f package.json
           echo "Web project is ready."
 
-      # 13. Fix Firebase import if required
-      - name: Fix Firebase import
-        working-directory: project
-        run: |
-          if [ -f src/lib/firebase.ts ]; then
-            echo "firebase.ts found."
-
-            if grep -q "firebase-applet-config.json" src/lib/firebase.ts; then
-              echo "Firebase configuration import found."
-            else
-              echo "No firebase-applet-config.json import found."
-            fi
-          else
-            echo "firebase.ts not found. Skipping."
-          fi
-
-      # 14. Build web app
       - name: Build web app
         working-directory: project
         run: |
           npm run build
 
-      # 15. Add Android
       - name: Add Android platform
         working-directory: project
         run: |
@@ -232,39 +199,33 @@ jobs:
             echo "Android platform already exists."
           fi
 
-      # 16. Sync Capacitor
       - name: Sync Capacitor
         working-directory: project
         run: |
           npx cap sync android
 
-      # 17. Setup Java
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 17
 
-      # 18. Make Gradle executable
       - name: Make Gradle executable
         working-directory: project/android
         run: |
           chmod +x gradlew
 
-      # 19. Build APK
       - name: Build Debug APK
         working-directory: project/android
         run: |
           ./gradlew assembleDebug --no-daemon
 
-      # 20. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Mojilo-Manish-APK
           path: project/android/app/build/outputs/apk/debug/app-debug.apk
 
-      # 21. Show APK
       - name: Show APK
         run: |
           echo "======================================"
