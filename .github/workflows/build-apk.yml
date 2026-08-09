@@ -1,10 +1,10 @@
 name: Build Mojilo Manish APK
 
 on:
-  workflow_dispatch:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build-apk:
@@ -15,148 +15,297 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
+      # --------------------------------------------------
+      # 1. Extract ZIP
+      # --------------------------------------------------
       - name: Extract project ZIP
+        shell: bash
         run: |
+          set -e
+
           rm -rf app
-          mkdir app
-          unzip -o mojilo-manish.zip -d app
 
-          echo "===== PROJECT FILES ====="
-          find app -maxdepth 4 -type f | sort
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
 
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: ZIP file not found"
+            exit 1
+          fi
 
+          echo "Using ZIP: $ZIP_FILE"
+
+          mkdir -p app
+          unzip -q "$ZIP_FILE" -d app
+
+          # If ZIP contains one inner folder, move its contents to app/
+          INNER_DIR=$(find app -mindepth 1 -maxdepth 1 -type d | head -n 1 || true)
+
+          if [ -n "$INNER_DIR" ]; then
+            if [ -f "$INNER_DIR/package.json" ]; then
+              shopt -s dotglob
+              cp -r "$INNER_DIR"/* app/
+              rm -rf "$INNER_DIR"
+            fi
+          fi
+
+          echo "Project files:"
+          find app -maxdepth 2 -type f | head -100
+
+      # --------------------------------------------------
+      # 2. Setup Node.js
+      # --------------------------------------------------
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
 
-
+      # --------------------------------------------------
+      # 3. Install dependencies
+      # --------------------------------------------------
       - name: Install project dependencies
         working-directory: app
+        shell: bash
         run: |
-          npm install
+          set -e
 
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
+      # --------------------------------------------------
+      # 4. Install Firebase
+      # --------------------------------------------------
       - name: Install Firebase
         working-directory: app
         run: |
           npm install firebase
 
-
+      # --------------------------------------------------
+      # 5. Install Capacitor
+      # --------------------------------------------------
       - name: Install Capacitor
         working-directory: app
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
 
-
+      # --------------------------------------------------
+      # 6. Create Firebase configuration
+      # --------------------------------------------------
       - name: Create Firebase configuration
         working-directory: app
+        shell: bash
+        run: |
+          mkdir -p src/lib
+
+          cat > src/lib/firebase.ts <<'EOF'
+          import { initializeApp } from "firebase/app";
+
+          const firebaseConfig = {
+            apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
+            authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "",
+            projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
+            storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
+            messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+            appId: import.meta.env.VITE_FIREBASE_APP_ID || ""
+          };
+
+          export const firebaseApp = initializeApp(firebaseConfig);
+          EOF
+
+      # --------------------------------------------------
+      # 7. Create Firebase config JSON
+      # --------------------------------------------------
+      - name: Create Firebase config JSON
+        working-directory: app
+        shell: bash
         run: |
           cat > firebase-applet-config.json <<'EOF'
           {
-            "apiKey": "AIzaSyDummyBuildKey",
-            "authDomain": "mojilo-manish.firebaseapp.com",
-            "projectId": "mojilo-manish",
-            "storageBucket": "mojilo-manish.firebasestorage.app",
-            "messagingSenderId": "000000000000",
-            "appId": "1:000000000000:web:0000000000000000000000",
-            "firestoreDatabaseId": "(default)"
+            "apiKey": "",
+            "authDomain": "",
+            "projectId": "",
+            "storageBucket": "",
+            "messagingSenderId": "",
+            "appId": ""
           }
           EOF
 
-          echo "Firebase configuration created."
-
-
-      - name: Create missing app icon
-        run: |
-          mkdir -p app/src/assets/images
-
-          python3 - <<'PY'
-          from PIL import Image, ImageDraw
-
-          img = Image.new("RGB", (512, 512), "white")
-          draw = ImageDraw.Draw(img)
-
-          draw.rounded_rectangle(
-              (20, 20, 492, 492),
-              radius=90,
-              fill="#2196F3"
-          )
-
-          draw.text(
-              (120, 205),
-              "MM",
-              fill="white"
-          )
-
-          img.save(
-              "app/src/assets/images/app_icon_1786271094033.jpg",
-              quality=95
-          )
-
-          print("App icon created successfully.")
-          PY
-
-
-      - name: Fix Firebase import
+      # --------------------------------------------------
+      # 8. Fix old Firebase import paths
+      # --------------------------------------------------
+      - name: Fix Firebase imports
         working-directory: app
+        shell: bash
         run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
+          if [ -f src/lib/firebase.ts ]; then
+            sed -i 's#\.\./\.\./\.\./firebase-applet-config\.json#../../firebase-applet-config.json#g' src/lib/firebase.ts || true
+            sed -i 's#\.\./\.\./firebase-applet-config\.json#../../firebase-applet-config.json#g' src/lib/firebase.ts || true
+          fi
 
-          file = Path("src/lib/firebase.ts")
+      # --------------------------------------------------
+      # 9. Create app icon WITHOUT Python/PIL
+      # --------------------------------------------------
+      - name: Create missing app icon
+        working-directory: app
+        shell: bash
+        run: |
+          mkdir -p src/assets/images
 
-          if file.exists():
-              text = file.read_text()
+          cat > src/assets/images/app_icon.svg <<'EOF'
+          <svg xmlns="http://www.w3.org/2000/svg"
+               width="512"
+               height="512"
+               viewBox="0 0 512 512">
 
-              text = re.sub(
-                  r'["\'](?:\.\./)+firebase-applet-config\.json["\']',
-                  '"../../firebase-applet-config.json"',
-                  text
-              )
+            <rect
+              width="512"
+              height="512"
+              rx="110"
+              fill="#1976D2"/>
 
-              file.write_text(text)
+            <circle
+              cx="256"
+              cy="220"
+              r="115"
+              fill="#FFFFFF"/>
 
-          print("Firebase import checked.")
-          PY
+            <text
+              x="256"
+              y="245"
+              text-anchor="middle"
+              font-family="Arial"
+              font-size="72"
+              font-weight="bold"
+              fill="#1976D2">
+              MM
+            </text>
 
+            <text
+              x="256"
+              y="380"
+              text-anchor="middle"
+              font-family="Arial"
+              font-size="38"
+              font-weight="bold"
+              fill="#FFFFFF">
+              EXAM
+            </text>
 
+          </svg>
+          EOF
+
+      # --------------------------------------------------
+      # 10. Fix missing JPG icon references
+      # --------------------------------------------------
+      - name: Fix app icon references
+        working-directory: app
+        shell: bash
+        run: |
+          find src -type f \( -name "*.tsx" -o -name "*.ts" -o -name "*.jsx" -o -name "*.js" \) -print0 |
+          while IFS= read -r -d '' file; do
+
+            sed -i \
+              -E 's#images/app_icon_[^"]+\.(jpg|jpeg|png)#images/app_icon.svg#g' \
+              "$file" || true
+
+            sed -i \
+              -E 's#\./images/app_icon_[^"]+\.(jpg|jpeg|png)#./images/app_icon.svg#g' \
+              "$file" || true
+
+          done
+
+      # --------------------------------------------------
+      # 11. Make sure Vite config exists
+      # --------------------------------------------------
+      - name: Check web project
+        working-directory: app
+        shell: bash
+        run: |
+          if [ ! -f package.json ]; then
+            echo "ERROR: package.json not found"
+            exit 1
+          fi
+
+          echo "package.json found"
+
+      # --------------------------------------------------
+      # 12. Build Web App
+      # --------------------------------------------------
       - name: Build web app
         working-directory: app
+        shell: bash
         run: |
           npm run build
 
-
+      # --------------------------------------------------
+      # 13. Add Android platform
+      # --------------------------------------------------
       - name: Add Android platform
         working-directory: app
+        shell: bash
         run: |
-          npx cap add android
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
 
-
+      # --------------------------------------------------
+      # 14. Sync Capacitor
+      # --------------------------------------------------
       - name: Sync Capacitor
         working-directory: app
+        shell: bash
         run: |
           npx cap sync android
 
-
+      # --------------------------------------------------
+      # 15. Setup Java
+      # --------------------------------------------------
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: 17
 
-
-      - name: Build Debug APK
-        working-directory: app/android
+      # --------------------------------------------------
+      # 16. Give Gradle permission
+      # --------------------------------------------------
+      - name: Make Gradle executable
+        working-directory: app
+        shell: bash
         run: |
-          chmod +x gradlew
+          chmod +x android/gradlew
+
+      # --------------------------------------------------
+      # 17. Build Debug APK
+      # --------------------------------------------------
+      - name: Build Debug APK
+        working-directory: app
+        shell: bash
+        run: |
+          cd android
           ./gradlew assembleDebug
 
-
+      # --------------------------------------------------
+      # 18. Upload APK
+      # --------------------------------------------------
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Mojilo-Manish-APK
           path: app/android/app/build/outputs/apk/debug/app-debug.apk
+
+      # --------------------------------------------------
+      # 19. Show APK location
+      # --------------------------------------------------
+      - name: Show APK
+        working-directory: app
+        shell: bash
+        run: |
+          echo "======================================"
+          echo "APK BUILD SUCCESSFUL"
+          echo "======================================"
+          ls -lh android/app/build/outputs/apk/debug/
