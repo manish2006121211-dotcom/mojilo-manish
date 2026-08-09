@@ -1,10 +1,10 @@
 name: Build Mojilo Manish APK
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 jobs:
   build-apk:
@@ -16,114 +16,149 @@ jobs:
 
       - name: Extract project ZIP
         run: |
-          rm -rf app
-          mkdir -p app
-          unzip -o mojilo-manish.zip -d app
+          mkdir -p project
+          ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+
+          if [ -n "$ZIP_FILE" ]; then
+            unzip -o "$ZIP_FILE" -d project
+          else
+            echo "No ZIP file found. Using repository files."
+            cp -r . project/
+          fi
 
       - name: Fix project folder
         run: |
-          if [ -d "app/app" ]; then
-            cp -a app/app/. app/
-            rm -rf app/app
+          cd project
+
+          if [ -f package.json ]; then
+            echo "Project found in project/"
+          else
+            FOUND=$(find . -name package.json -type f | head -n 1)
+
+            if [ -n "$FOUND" ]; then
+              DIR=$(dirname "$FOUND")
+              cp -r "$DIR"/* .
+            fi
           fi
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 20
+          cache: npm
+          cache-dependency-path: project/package-lock.json
 
       - name: Install project dependencies
-        working-directory: app
+        working-directory: project
         run: |
-          npm install
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
 
       - name: Install Firebase
-        working-directory: app
+        working-directory: project
         run: |
           npm install firebase
 
       - name: Install Capacitor
-        working-directory: app
+        working-directory: project
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core @capacitor/cli
+          npm install @capacitor/android
 
-      - name: Create Firebase configuration
-        working-directory: app
+      - name: Install Pillow
         run: |
-          cat > firebase-applet-config.json <<'EOF'
-          {
-            "apiKey": "${{ secrets.FIREBASE_API_KEY }}",
-            "authDomain": "${{ secrets.FIREBASE_AUTH_DOMAIN }}",
-            "projectId": "${{ secrets.FIREBASE_PROJECT_ID }}",
-            "storageBucket": "${{ secrets.FIREBASE_STORAGE_BUCKET }}",
-            "messagingSenderId": "${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}",
-            "appId": "${{ secrets.FIREBASE_APP_ID }}"
-          }
-          EOF
-
-      - name: Fix Firebase import
-        working-directory: app
-        run: |
-          if [ -f "src/lib/firebase.ts" ]; then
-            sed -i 's#"\.\./\.\./firebase-applet-config\.json"#"../../firebase-applet-config.json"#g' src/lib/firebase.ts
-            sed -i "s#'../../firebase-applet-config.json'#'../../firebase-applet-config.json'#g" src/lib/firebase.ts
-          fi
+          python3 -m pip install --upgrade pip
+          python3 -m pip install Pillow
 
       - name: Create app icon
-        working-directory: app
         run: |
-          mkdir -p src/assets/images
+          mkdir -p project/src/assets/images
+
           python3 - <<'PY'
+          from PIL import Image, ImageDraw, ImageFont
           import os
-          from PIL import Image, ImageDraw
 
-          path = "src/assets/images/app_icon.png"
+          size = 1024
 
-          img = Image.new("RGBA", (512, 512), (30, 100, 220, 255))
+          img = Image.new("RGB", (size, size), "#2563EB")
           draw = ImageDraw.Draw(img)
 
+          # Rounded white center
+          margin = 100
           draw.rounded_rectangle(
-              (40, 40, 472, 472),
-              radius=90,
-              fill=(30, 100, 220, 255)
-          )
-
-          draw.text(
-              (130, 180),
-              "M",
+              (margin, margin, size-margin, size-margin),
+              radius=180,
               fill="white"
           )
 
-          img.save(path)
-          print("App icon created:", path)
+          # Try to use a large system font
+          font_paths = [
+              "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+              "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"
+          ]
+
+          font = None
+
+          for path in font_paths:
+              if os.path.exists(path):
+                  font = ImageFont.truetype(path, 400)
+                  break
+
+          if font is None:
+              font = ImageFont.load_default()
+
+          text = "M"
+
+          bbox = draw.textbbox((0, 0), text, font=font)
+          text_width = bbox[2] - bbox[0]
+          text_height = bbox[3] - bbox[1]
+
+          x = (size - text_width) // 2
+          y = (size - text_height) // 2 - 30
+
+          draw.text(
+              (x, y),
+              text,
+              fill="#2563EB",
+              font=font
+          )
+
+          img.save(
+              "project/src/assets/images/icon.png",
+              "PNG"
+          )
+
+          print("App icon created successfully.")
+
           PY
 
       - name: Check web project
-        working-directory: app
+        working-directory: project
         run: |
-          test -f package.json
-          test -f index.html
-          test -d src
-          echo "Web project OK"
+          if [ ! -f package.json ]; then
+            echo "ERROR: package.json not found."
+            exit 1
+          fi
 
-      - name: Fix app icon references
-        working-directory: app
-        run: |
-          find src -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.css" \) -print0 |
-          xargs -0 sed -i 's#\./images/app_icon_[^"]*\.jpg#./images/app_icon.png#g' || true
+          echo "Web project found."
 
       - name: Build web app
-        working-directory: app
+        working-directory: project
         run: |
           npm run build
 
       - name: Add Android platform
-        working-directory: app
+        working-directory: project
         run: |
-          npx cap add android
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
 
       - name: Sync Capacitor
-        working-directory: app
+        working-directory: project
         run: |
           npx cap sync android
 
@@ -131,26 +166,27 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: 17
 
       - name: Make Gradle executable
-        working-directory: app
+        working-directory: project/android
         run: |
-          chmod +x android/gradlew
+          chmod +x gradlew
 
       - name: Build Debug APK
-        working-directory: app
+        working-directory: project/android
         run: |
-          cd android
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Mojilo-Manish-APK
-          path: app/android/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
+          path: project/android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Show APK
         run: |
-          ls -lh app/android/app/build/outputs/apk/debug/app-debug.apk
+          echo "======================================"
+          echo "Mojilo Manish APK BUILD SUCCESSFUL"
+          echo "======================================"
+          ls -lh project/android/app/build/outputs/apk/debug/app-debug.apk
