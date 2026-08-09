@@ -1,14 +1,170 @@
-import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
+name: Build Mojilo Manish APK
 
-import firebaseConfig from "../../firebase-applet-config.json";
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
 
-const app = initializeApp(firebaseConfig);
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
 
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-export default app;
+      - name: Extract project ZIP
+        run: |
+          rm -rf app
+          mkdir -p app
+          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
+
+          if [ -z "$ZIP_FILE" ]; then
+            echo "ERROR: Project ZIP file not found."
+            exit 1
+          fi
+
+          unzip -q "$ZIP_FILE" -d app
+
+          if [ -f "app/package.json" ]; then
+            echo "Project found in app/"
+          else
+            INNER_DIR=$(find app -mindepth 1 -maxdepth 1 -type d | head -n 1)
+
+            if [ -n "$INNER_DIR" ] && [ -f "$INNER_DIR/package.json" ]; then
+              cp -a "$INNER_DIR"/. app/
+            fi
+          fi
+
+          echo "Project files:"
+          ls -la app
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install project dependencies
+        working-directory: app
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci
+          else
+            npm install
+          fi
+
+      - name: Install Firebase
+        working-directory: app
+        run: |
+          npm install firebase
+
+      - name: Install Capacitor
+        working-directory: app
+        run: |
+          npm install @capacitor/core @capacitor/cli @capacitor/android
+
+      - name: Create Firebase configuration
+        working-directory: app
+        run: |
+          if [ ! -f firebase-applet-config.json ]; then
+            cat > firebase-applet-config.json <<'EOF'
+          {
+            "apiKey": "",
+            "authDomain": "",
+            "projectId": "",
+            "storageBucket": "",
+            "messagingSenderId": "",
+            "appId": ""
+          }
+          EOF
+          fi
+
+      - name: Fix Firebase import
+        working-directory: app
+        run: |
+          if [ -f src/lib/firebase.ts ]; then
+            cat > src/lib/firebase.ts <<'EOF'
+          import { initializeApp } from "firebase/app";
+          import { getAuth } from "firebase/auth";
+          import { getFirestore } from "firebase/firestore";
+          import { getStorage } from "firebase/storage";
+
+          import firebaseConfig from "../../firebase-applet-config.json";
+
+          const app = initializeApp(firebaseConfig);
+
+          export const auth = getAuth(app);
+          export const db = getFirestore(app);
+          export const storage = getStorage(app);
+
+          export default app;
+          EOF
+          fi
+
+      - name: Create missing app icon
+        working-directory: app
+        run: |
+          mkdir -p src/assets/images
+          python3 - <<'PY'
+          import base64
+          import os
+
+          png = base64.b64decode(
+              "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAAB"
+          )
+
+          # Create directory only.
+          # Existing app icon will be used when available.
+          os.makedirs("src/assets/images", exist_ok=True)
+          PY
+
+      - name: Check web project
+        working-directory: app
+        run: |
+          test -f package.json
+          test -f index.html
+          echo "Web project check passed."
+
+      - name: Build web app
+        working-directory: app
+        run: |
+          npm run build
+
+      - name: Add Android platform
+        working-directory: app
+        run: |
+          if [ ! -d android ]; then
+            npx cap add android
+          fi
+
+      - name: Sync Capacitor
+        working-directory: app
+        run: |
+          npx cap sync android
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Make Gradle executable
+        working-directory: app
+        run: |
+          chmod +x android/gradlew
+
+      - name: Build Debug APK
+        working-directory: app
+        run: |
+          cd android
+          ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Mojilo-Manish-APK
+          path: app/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
