@@ -12,9 +12,11 @@ jobs:
 
     steps:
 
+      # 1. Checkout
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # 2. Extract ZIP
       - name: Extract project ZIP
         run: |
           mkdir -p project
@@ -29,6 +31,7 @@ jobs:
             cp -r . project/
           fi
 
+      # 3. Find project
       - name: Fix project folder
         run: |
           cd project
@@ -51,6 +54,9 @@ jobs:
             fi
           fi
 
+          echo "Project ready."
+
+      # 4. Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -61,6 +67,7 @@ jobs:
           node --version
           npm --version
 
+      # 5. Dependencies
       - name: Install project dependencies
         working-directory: project
         run: |
@@ -70,17 +77,20 @@ jobs:
             npm install
           fi
 
+      # 6. Firebase
       - name: Install Firebase
         working-directory: project
         run: |
           npm install firebase
 
+      # 7. Capacitor
       - name: Install Capacitor
         working-directory: project
         run: |
           npm install @capacitor/core @capacitor/cli
           npm install @capacitor/android
 
+      # 8. Firebase configuration
       - name: Create Firebase configuration
         working-directory: project
         run: |
@@ -97,11 +107,13 @@ jobs:
 
           echo "Firebase configuration created."
 
+      # 9. Pillow
       - name: Install Pillow
         run: |
           python3 -m pip install --upgrade pip
           python3 -m pip install Pillow
 
+      # 10. Create images
       - name: Create required app images
         run: |
           mkdir -p project/src/assets/images
@@ -123,7 +135,12 @@ jobs:
           margin = 100
 
           draw.rounded_rectangle(
-              (margin, margin, size - margin, size - margin),
+              (
+                  margin,
+                  margin,
+                  size - margin,
+                  size - margin
+              ),
               radius=180,
               fill="white"
           )
@@ -175,29 +192,33 @@ jobs:
               quality=95
           )
 
-          print("Required app images created successfully.")
+          print("App images created.")
 
           PY
 
           ls -lh project/src/assets/images/
 
+      # 11. Verify image
       - name: Verify required image
         working-directory: project
         run: |
           test -f src/assets/images/app_icon_1786271094033.jpg
           echo "Required JPG image found."
 
+      # 12. Check project
       - name: Check web project
         working-directory: project
         run: |
           test -f package.json
           echo "Web project is ready."
 
+      # 13. Build web app
       - name: Build web app
         working-directory: project
         run: |
           npm run build
 
+      # 14. Add Android
       - name: Add Android platform
         working-directory: project
         run: |
@@ -207,39 +228,69 @@ jobs:
             echo "Android platform already exists."
           fi
 
+      # 15. Sync Capacitor
       - name: Sync Capacitor
         working-directory: project
         run: |
           npx cap sync android
 
-      # IMPORTANT: Project requires Java 21
+      # 16. Install Android SDK 35
+      - name: Setup Android SDK 35
+        run: |
+          yes | ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+          ${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      # 17. Set compile SDK 35
+      - name: Set Android compile SDK 35
+        working-directory: project/android
+        run: |
+          echo "Updating Android compile SDK to 35..."
+
+          find . -name "*.gradle" -type f -exec sed -i \
+            -e 's/compileSdkVersion[[:space:]]*=[[:space:]]*34/compileSdkVersion = 35/g' \
+            -e 's/compileSdkVersion[[:space:]]*34/compileSdkVersion 35/g' \
+            -e 's/targetSdkVersion[[:space:]]*=[[:space:]]*34/targetSdkVersion = 35/g' \
+            -e 's/targetSdkVersion[[:space:]]*34/targetSdkVersion 35/g' \
+            {} +
+
+          echo "Android SDK configuration updated."
+
+      # 18. Java 21
       - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
 
+      # 19. Check Java
       - name: Check Java version
         run: |
           java -version
           javac -version
 
+      # 20. Gradle permission
       - name: Make Gradle executable
         working-directory: project/android
         run: |
           chmod +x gradlew
 
+      # 21. Build APK
       - name: Build Debug APK
         working-directory: project/android
         run: |
           ./gradlew assembleDebug --no-daemon
 
+      # 22. Upload APK
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Mojilo-Manish-APK
           path: project/android/app/build/outputs/apk/debug/app-debug.apk
 
+      # 23. Show APK
       - name: Show APK
         run: |
           echo "======================================"
