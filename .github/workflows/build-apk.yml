@@ -18,43 +18,24 @@ jobs:
         run: |
           rm -rf app
           mkdir -p app
-          ZIP_FILE=$(find . -maxdepth 1 -type f -name "*.zip" | head -n 1)
+          unzip -o mojilo-manish.zip -d app
 
-          if [ -z "$ZIP_FILE" ]; then
-            echo "ERROR: Project ZIP file not found."
-            exit 1
+      - name: Fix project folder
+        run: |
+          if [ -d "app/app" ]; then
+            cp -a app/app/. app/
+            rm -rf app/app
           fi
-
-          unzip -q "$ZIP_FILE" -d app
-
-          if [ -f "app/package.json" ]; then
-            echo "Project found in app/"
-          else
-            INNER_DIR=$(find app -mindepth 1 -maxdepth 1 -type d | head -n 1)
-
-            if [ -n "$INNER_DIR" ] && [ -f "$INNER_DIR/package.json" ]; then
-              cp -a "$INNER_DIR"/. app/
-            fi
-          fi
-
-          echo "Project files:"
-          ls -la app
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: app/package-lock.json
+          node-version: 22
 
       - name: Install project dependencies
         working-directory: app
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install
-          fi
+          npm install
 
       - name: Install Firebase
         working-directory: app
@@ -69,56 +50,52 @@ jobs:
       - name: Create Firebase configuration
         working-directory: app
         run: |
-          if [ ! -f firebase-applet-config.json ]; then
-            cat > firebase-applet-config.json <<'EOF'
+          cat > firebase-applet-config.json <<'EOF'
           {
-            "apiKey": "",
-            "authDomain": "",
-            "projectId": "",
-            "storageBucket": "",
-            "messagingSenderId": "",
-            "appId": ""
+            "apiKey": "${{ secrets.FIREBASE_API_KEY }}",
+            "authDomain": "${{ secrets.FIREBASE_AUTH_DOMAIN }}",
+            "projectId": "${{ secrets.FIREBASE_PROJECT_ID }}",
+            "storageBucket": "${{ secrets.FIREBASE_STORAGE_BUCKET }}",
+            "messagingSenderId": "${{ secrets.FIREBASE_MESSAGING_SENDER_ID }}",
+            "appId": "${{ secrets.FIREBASE_APP_ID }}"
           }
           EOF
-          fi
 
       - name: Fix Firebase import
         working-directory: app
         run: |
-          if [ -f src/lib/firebase.ts ]; then
-            cat > src/lib/firebase.ts <<'EOF'
-          import { initializeApp } from "firebase/app";
-          import { getAuth } from "firebase/auth";
-          import { getFirestore } from "firebase/firestore";
-          import { getStorage } from "firebase/storage";
-
-          import firebaseConfig from "../../firebase-applet-config.json";
-
-          const app = initializeApp(firebaseConfig);
-
-          export const auth = getAuth(app);
-          export const db = getFirestore(app);
-          export const storage = getStorage(app);
-
-          export default app;
-          EOF
+          if [ -f "src/lib/firebase.ts" ]; then
+            sed -i 's#"\.\./\.\./firebase-applet-config\.json"#"../../firebase-applet-config.json"#g' src/lib/firebase.ts
+            sed -i "s#'../../firebase-applet-config.json'#'../../firebase-applet-config.json'#g" src/lib/firebase.ts
           fi
 
-      - name: Create missing app icon
+      - name: Create app icon
         working-directory: app
         run: |
           mkdir -p src/assets/images
           python3 - <<'PY'
-          import base64
           import os
+          from PIL import Image, ImageDraw
 
-          png = base64.b64decode(
-              "iVBORw0KGgoAAAANSUhEUgAAAMAAAADACAYAAAB"
+          path = "src/assets/images/app_icon.png"
+
+          img = Image.new("RGBA", (512, 512), (30, 100, 220, 255))
+          draw = ImageDraw.Draw(img)
+
+          draw.rounded_rectangle(
+              (40, 40, 472, 472),
+              radius=90,
+              fill=(30, 100, 220, 255)
           )
 
-          # Create directory only.
-          # Existing app icon will be used when available.
-          os.makedirs("src/assets/images", exist_ok=True)
+          draw.text(
+              (130, 180),
+              "M",
+              fill="white"
+          )
+
+          img.save(path)
+          print("App icon created:", path)
           PY
 
       - name: Check web project
@@ -126,7 +103,14 @@ jobs:
         run: |
           test -f package.json
           test -f index.html
-          echo "Web project check passed."
+          test -d src
+          echo "Web project OK"
+
+      - name: Fix app icon references
+        working-directory: app
+        run: |
+          find src -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.js" -o -name "*.jsx" -o -name "*.css" \) -print0 |
+          xargs -0 sed -i 's#\./images/app_icon_[^"]*\.jpg#./images/app_icon.png#g' || true
 
       - name: Build web app
         working-directory: app
@@ -136,9 +120,7 @@ jobs:
       - name: Add Android platform
         working-directory: app
         run: |
-          if [ ! -d android ]; then
-            npx cap add android
-          fi
+          npx cap add android
 
       - name: Sync Capacitor
         working-directory: app
@@ -149,7 +131,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 21
+          java-version: "17"
 
       - name: Make Gradle executable
         working-directory: app
@@ -168,3 +150,7 @@ jobs:
           name: Mojilo-Manish-APK
           path: app/android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Show APK
+        run: |
+          ls -lh app/android/app/build/outputs/apk/debug/app-debug.apk
