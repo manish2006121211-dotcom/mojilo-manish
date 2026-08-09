@@ -11,18 +11,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Extract project ZIP
         run: |
           mkdir -p project
+
           ZIP_FILE=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
 
           if [ -n "$ZIP_FILE" ]; then
+            echo "ZIP found: $ZIP_FILE"
             unzip -o "$ZIP_FILE" -d project
           else
-            echo "No ZIP file found. Using repository files."
+            echo "No ZIP found. Using repository files."
             cp -r . project/
           fi
 
@@ -31,22 +34,33 @@ jobs:
           cd project
 
           if [ -f package.json ]; then
-            echo "Project found in project/"
+            echo "package.json found."
           else
             FOUND=$(find . -name package.json -type f | head -n 1)
 
             if [ -n "$FOUND" ]; then
               DIR=$(dirname "$FOUND")
+              echo "Project found in: $DIR"
               cp -r "$DIR"/* .
+              cp -r "$DIR"/.[!.]* . 2>/dev/null || true
+            else
+              echo "ERROR: package.json not found."
+              exit 1
             fi
           fi
+
+          echo "Project files:"
+          ls -la
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: project/package-lock.json
+
+      - name: Check Node and npm
+        run: |
+          node --version
+          npm --version
 
       - name: Install project dependencies
         working-directory: project
@@ -86,15 +100,14 @@ jobs:
           img = Image.new("RGB", (size, size), "#2563EB")
           draw = ImageDraw.Draw(img)
 
-          # Rounded white center
           margin = 100
+
           draw.rounded_rectangle(
-              (margin, margin, size-margin, size-margin),
+              (margin, margin, size - margin, size - margin),
               radius=180,
               fill="white"
           )
 
-          # Try to use a large system font
           font_paths = [
               "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
               "/usr/share/fonts/truetype/liberation2/LiberationSans-Bold.ttf"
@@ -113,6 +126,7 @@ jobs:
           text = "M"
 
           bbox = draw.textbbox((0, 0), text, font=font)
+
           text_width = bbox[2] - bbox[0]
           text_height = bbox[3] - bbox[1]
 
@@ -138,12 +152,8 @@ jobs:
       - name: Check web project
         working-directory: project
         run: |
-          if [ ! -f package.json ]; then
-            echo "ERROR: package.json not found."
-            exit 1
-          fi
-
-          echo "Web project found."
+          test -f package.json
+          echo "Web project is ready."
 
       - name: Build web app
         working-directory: project
@@ -155,6 +165,8 @@ jobs:
         run: |
           if [ ! -d android ]; then
             npx cap add android
+          else
+            echo "Android platform already exists."
           fi
 
       - name: Sync Capacitor
@@ -187,6 +199,7 @@ jobs:
       - name: Show APK
         run: |
           echo "======================================"
-          echo "Mojilo Manish APK BUILD SUCCESSFUL"
+          echo "MOJILO MANISH APK BUILD SUCCESSFUL"
           echo "======================================"
+
           ls -lh project/android/app/build/outputs/apk/debug/app-debug.apk
