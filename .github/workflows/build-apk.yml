@@ -19,8 +19,9 @@ jobs:
           rm -rf app
           mkdir app
           unzip -o mojilo-manish.zip -d app
-          echo "Project extracted:"
-          ls -la app
+
+          echo "===== Extracted files ====="
+          find app -maxdepth 3 -type f | sort
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,7 +41,28 @@ jobs:
         run: |
           npm install @capacitor/core @capacitor/cli @capacitor/android
 
-      - name: Fix Firebase config import
+      - name: Locate Firebase config
+        run: |
+          echo "Searching for Firebase config..."
+          find app -type f -name "firebase-applet-config.json" -print
+
+          CONFIG=$(find app -type f -name "firebase-applet-config.json" | head -n 1)
+
+          if [ -z "$CONFIG" ]; then
+            echo "Firebase config file not found."
+            exit 1
+          fi
+
+          echo "Found: $CONFIG"
+
+          if [ "$CONFIG" != "app/firebase-applet-config.json" ]; then
+            cp "$CONFIG" app/firebase-applet-config.json
+          fi
+
+          test -f app/firebase-applet-config.json
+          echo "Firebase config is ready."
+
+      - name: Fix Firebase import
         working-directory: app
         run: |
           python3 - <<'PY'
@@ -51,24 +73,18 @@ jobs:
           text = file.read_text()
 
           text = re.sub(
-              r'(\.\./)+firebase-applet-config\.json',
+              r'(?:\.\./)+firebase-applet-config\.json',
               '../../firebase-applet-config.json',
               text
           )
 
           file.write_text(text)
 
-          print("Firebase config import fixed:")
+          print("===== Firebase import =====")
           for line in text.splitlines():
               if "firebase-applet-config" in line:
                   print(line)
           PY
-
-      - name: Verify Firebase config
-        working-directory: app
-        run: |
-          test -f firebase-applet-config.json
-          echo "Firebase config file found."
 
       - name: Build web app
         working-directory: app
